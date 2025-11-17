@@ -57,6 +57,89 @@ class Shopify1CheckoutAutomation:
             logger.error(f"❌ Errore inizializzazione driver: {e}")
             return False
 
+    def close_popups(self):
+        """Chiude popup e banner che potrebbero bloccare i click"""
+        try:
+            logger.info("🔍 Cercando popup da chiudere...")
+            
+            # Lista di selettori per popup comuni su Shopify
+            popup_selectors = [
+                "#shopify-pc__banner",  # Popup che ha causato l'errore
+                ".shopify-pc__banner__dialog",
+                ".popup",
+                ".modal",
+                ".newsletter-popup",
+                "#newsletter-popup",
+                ".age-verification",
+                "#age-verification",
+                ".cookie-banner",
+                "#cookie-banner",
+                "[aria-label*='close']",
+                ".close-button",
+                ".popup-close",
+                ".modal-close"
+            ]
+            
+            for selector in popup_selectors:
+                try:
+                    popup = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if popup.is_displayed():
+                        # Prova a trovare e cliccare il bottone close
+                        close_buttons = [
+                            f"{selector} [aria-label*='close']",
+                            f"{selector} .close",
+                            f"{selector} .close-button",
+                            f"{selector} .popup-close",
+                            f"{selector} .modal-close",
+                            f"{selector} button",
+                            f"{selector} [class*='close']"
+                        ]
+                        
+                        for close_selector in close_buttons:
+                            try:
+                                close_btn = self.driver.find_element(By.CSS_SELECTOR, close_selector)
+                                if close_btn.is_displayed():
+                                    self.driver.execute_script("arguments[0].click();", close_btn)
+                                    logger.info(f"✅ Chiuso popup con: {close_selector}")
+                                    time.sleep(1)
+                                    break
+                            except:
+                                continue
+                        
+                        # Se non trova bottone close, prova a chiudere con ESC
+                        try:
+                            from selenium.webdriver.common.keys import Keys
+                            self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+                            logger.info("✅ Chiuso popup con ESC")
+                            time.sleep(1)
+                        except:
+                            pass
+                            
+                except:
+                    continue
+            
+            # Prova anche con JavaScript per rimuovere overlay
+            try:
+                self.driver.execute_script("""
+                    // Rimuovi overlay che bloccano i click
+                    const overlays = document.querySelectorAll('.popup-overlay, .modal-overlay, .popup-backdrop');
+                    overlays.forEach(overlay => {
+                        if (overlay) overlay.style.display = 'none';
+                    });
+                    
+                    // Rimuovi popup che bloccano
+                    const blockers = document.querySelectorAll('#shopify-pc__banner, .shopify-pc__banner__dialog');
+                    blockers.forEach(blocker => {
+                        if (blocker) blocker.style.display = 'none';
+                    });
+                """)
+                logger.info("✅ Rimossi overlay con JavaScript")
+            except:
+                pass
+                
+        except Exception as e:
+            logger.info(f"ℹ️ Nessun popup trovato o errore nella chiusura: {e}")
+
     def generate_italian_info(self):
         """Genera informazioni italiane per il checkout"""
         first_names = ['Marco', 'Luca', 'Giuseppe', 'Andrea']
@@ -81,9 +164,21 @@ class Shopify1CheckoutAutomation:
             self.driver.get("https://earthesim.com/products/usa-esim?variant=42902995271773")
             time.sleep(5)
             
-            add_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
-            add_button.click()
-            logger.info("✅ Prodotto Shopify $1 aggiunto al carrello")
+            # Chiudi eventuali popup prima di cliccare
+            self.close_popups()
+            time.sleep(2)
+            
+            # Aspetta che il bottone sia cliccabile
+            add_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit'][name='add']")))
+            
+            # Prova prima con JavaScript click per evitare interception
+            try:
+                self.driver.execute_script("arguments[0].click();", add_button)
+                logger.info("✅ Prodotto aggiunto al carrello via JavaScript")
+            except:
+                # Se JavaScript fallisce, prova click normale
+                add_button.click()
+                logger.info("✅ Prodotto aggiunto al carrello via click normale")
             
             time.sleep(5)
             return True
@@ -99,8 +194,14 @@ class Shopify1CheckoutAutomation:
             self.driver.get("https://earthesim.com/cart")
             time.sleep(5)
             
+            # Chiudi popup
+            self.close_popups()
+            time.sleep(2)
+            
             checkout_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button#checkout")))
-            checkout_button.click()
+            
+            # Usa JavaScript click per evitare interception
+            self.driver.execute_script("arguments[0].click();", checkout_button)
             logger.info("✅ Cliccato 'Check out' Shopify $1")
             
             time.sleep(8)
@@ -115,6 +216,10 @@ class Shopify1CheckoutAutomation:
         try:
             logger.info("📦 Compilazione informazioni di spedizione Shopify $1...")
             time.sleep(10)
+            
+            # Chiudi popup
+            self.close_popups()
+            time.sleep(2)
             
             # EMAIL
             email_field = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input#email")))
@@ -236,14 +341,14 @@ class Shopify1CheckoutAutomation:
                 is_enabled = pay_button.is_enabled()
             
             if is_enabled:
-                pay_button.click()
-                logger.info("✅ Cliccato 'Pay Now' Shopify $1")
+                self.driver.execute_script("arguments[0].click();", pay_button)
+                logger.info("✅ Cliccato 'Pay Now' Shopify $1 via JavaScript")
                 time.sleep(10)
                 return True
             else:
                 try:
                     self.driver.execute_script("arguments[0].click();", pay_button)
-                    logger.info("✅ Cliccato 'Pay Now' Shopify $1 via JavaScript")
+                    logger.info("✅ Cliccato 'Pay Now' Shopify $1 via JavaScript (forzato)")
                     time.sleep(10)
                     return True
                 except:
