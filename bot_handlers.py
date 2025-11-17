@@ -176,7 +176,7 @@ async def gates_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Stripe $1", callback_data="gate_stripe1")],
         [InlineKeyboardButton("Stripe $5", callback_data="gate_stripe5")],
         [InlineKeyboardButton("Shopify $1", callback_data="gate_shopify")],
-        [InlineKeyboardButton("AuthNet $300", callback_data="gate_authnet")],  # CAMBIATO DA Tempest
+        [InlineKeyboardButton("authnet $32", callback_data="gate_authnet")],  # CAMBIATO DA Tempest
         [InlineKeyboardButton("Caliper", callback_data="gate_caliper")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
     ]
@@ -521,4 +521,5 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start_command(update, context)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     logger.error(f"Error: {context.error}")
