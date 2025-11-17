@@ -8,7 +8,8 @@ from api_client import api_client
 from response_formatter import format_api_response, format_bin_response, format_gen_response, format_crunchyroll_response, format_error_message, start_timer
 from security import can_use_command, is_allowed_chat, is_owner, get_cooldown_status, get_chat_permissions, add_allowed_chat, remove_allowed_chat, get_allowed_chats
 from payment_processor import process_card_payment
-from tempest_client import authnet_command  # CAMBIATO DA tempest_command A authnet_command
+from tempest_client import authnet_command
+from shopify1_client import s1_command  # NUOVO IMPORT
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,8 @@ async def gates_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Stripe $1", callback_data="gate_stripe1")],
         [InlineKeyboardButton("Stripe $5", callback_data="gate_stripe5")],
         [InlineKeyboardButton("Shopify $1", callback_data="gate_shopify")],
-        [InlineKeyboardButton("authnet $32", callback_data="gate_authnet")],  # CAMBIATO DA Tempest
+        [InlineKeyboardButton("Shopify $1", callback_data="gate_s1")],  # NUOVO PULSANTE
+        [InlineKeyboardButton("AuthNet $300", callback_data="gate_authnet")],
         [InlineKeyboardButton("Caliper", callback_data="gate_caliper")],
         [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
     ]
@@ -232,7 +234,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("Stripe $1", callback_data="gate_stripe1")],
             [InlineKeyboardButton("Stripe $5", callback_data="gate_stripe5")],
             [InlineKeyboardButton("Shopify $1 (off)", callback_data="gate_shopify")],
-            [InlineKeyboardButton("authnet $32", callback_data="gate_authnet")],  # CAMBIATO DA Tempest
+            [InlineKeyboardButton("Shopify $1", callback_data="gate_s1")],  # NUOVO PULSANTE
+            [InlineKeyboardButton("authnet $32", callback_data="gate_authnet")],
             [InlineKeyboardButton("braintree auth (wip)", callback_data="gate_caliper")],
             [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
         ]
@@ -264,10 +267,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gate_type = data.split("_")[1]
         cooldown_status = get_cooldown_status(user_id)
         permission_info = get_chat_permissions(chat_id, chat_type, user_id)
-        if gate_type == "authnet":  # CAMBIATO DA tempest
+        if gate_type == "authnet":
             await query.edit_message_text(f"Usage: /au number|month|year|cvv [proxy]\n\nExample: 4147400214647297|12|2026|123\nExample with proxy: 4147400214647297|12|2026|123 http://proxy-ip:port\n\n{permission_info}\n{cooldown_status}")
         elif gate_type == "caliper":
             await query.edit_message_text(f"Usage: /caliper number|month|year|cvv [proxy]\n\nExample: 4147768578745265|04|2026|168\nExample with proxy: 4147768578745265|04|2026|168 http://proxy-ip:port\n\n{permission_info}\n{cooldown_status}")
+        elif gate_type == "s1":  # NUOVO CASE
+            await query.edit_message_text(f"Usage: /s1 number|month|year|cvv [proxy]\n\nExample: 4111111111111111|12|2028|123\nExample with proxy: 4111111111111111|12|2028|123 http://proxy-ip:port\n\n{permission_info}\n{cooldown_status}")
         else:
             await query.edit_message_text(f"Usage: /{gate_type} number|month|year|cvv\n\nExample: 4147768578745265|04|2026|168\n\n{permission_info}\n{cooldown_status}")
     
@@ -288,10 +293,6 @@ async def stripe5_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def shopify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _check_card_gateway(update, context, 'sh')
-
-# RIMUOVI IL VECCHIO authnet_command CHE USA L'API
-# async def authnet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     await _check_card_gateway(update, context, 'au')
 
 async def authnet_command_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Wrapper for /au command - now uses AuthNet Gate"""
@@ -412,7 +413,6 @@ async def _check_card_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE
             'chk': 'stripe1',
             'st5': 'stripe5', 
             'sh': 'shopify'
-            # 'au' removed because now it uses AuthNet Gate
         }
         
         api_result = api_client.check_card(parsed_card['card_data'], gateway=gateways[command])
@@ -521,5 +521,4 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start_command(update, context)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     logger.error(f"Error: {context.error}")
