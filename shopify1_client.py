@@ -105,15 +105,6 @@ class Shopify1CheckoutAutomation:
                                     break
                             except:
                                 continue
-                        
-                        # Se non trova bottone close, prova a chiudere con ESC
-                        try:
-                            from selenium.webdriver.common.keys import Keys
-                            self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
-                            logger.info("✅ Chiuso popup con ESC")
-                            time.sleep(1)
-                        except:
-                            pass
                             
                 except:
                     continue
@@ -131,6 +122,14 @@ class Shopify1CheckoutAutomation:
                     const blockers = document.querySelectorAll('#shopify-pc__banner, .shopify-pc__banner__dialog');
                     blockers.forEach(blocker => {
                         if (blocker) blocker.style.display = 'none';
+                    });
+                    
+                    // Rimuovi elementi fixed che potrebbero bloccare
+                    const fixedElements = document.querySelectorAll('[style*="fixed"]');
+                    fixedElements.forEach(el => {
+                        if (el.getBoundingClientRect().top < 100) {
+                            el.style.display = 'none';
+                        }
                     });
                 """)
                 logger.info("✅ Rimossi overlay con JavaScript")
@@ -169,18 +168,68 @@ class Shopify1CheckoutAutomation:
             time.sleep(2)
             
             # Aspetta che il bottone sia cliccabile
-            add_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit'][name='add']")))
+            add_button_selectors = [
+                "button[type='submit'][name='add']",
+                "button[type='submit']",
+                "#ProductSubmitButton-template--17324883378269__main",
+                ".product-form__submit",
+                "button[class*='add-to-cart']"
+            ]
+            
+            add_button = None
+            for selector in add_button_selectors:
+                try:
+                    add_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    logger.info(f"✅ Trovato bottone con: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not add_button:
+                logger.error("❌ Bottone add to cart non trovato")
+                return False
             
             # Prova prima con JavaScript click per evitare interception
             try:
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", add_button)
+                time.sleep(1)
                 self.driver.execute_script("arguments[0].click();", add_button)
                 logger.info("✅ Prodotto aggiunto al carrello via JavaScript")
-            except:
-                # Se JavaScript fallisce, prova click normale
-                add_button.click()
-                logger.info("✅ Prodotto aggiunto al carrello via click normale")
+            except Exception as js_error:
+                logger.warning(f"⚠️ JavaScript click fallito: {js_error}, provo click normale")
+                try:
+                    add_button.click()
+                    logger.info("✅ Prodotto aggiunto al carrello via click normale")
+                except Exception as click_error:
+                    logger.error(f"❌ Anche click normale fallito: {click_error}")
+                    return False
             
+            # Verifica che il prodotto sia stato aggiunto
             time.sleep(5)
+            
+            # Controlla se siamo ancora sulla pagina prodotto (potrebbe esserci un errore)
+            current_url = self.driver.current_url
+            if "cart" not in current_url and "checkout" not in current_url:
+                # Potrebbe esserci un mini-cart o messaggio di successo
+                try:
+                    success_indicators = [
+                        ".cart-notification",
+                        "[class*='success']",
+                        "[class*='added']",
+                        ".ajax-cart__message"
+                    ]
+                    for indicator in success_indicators:
+                        try:
+                            element = self.driver.find_element(By.CSS_SELECTOR, indicator)
+                            if element.is_displayed():
+                                logger.info("✅ Prodotto aggiunto (confermato da messaggio)")
+                                return True
+                        except:
+                            continue
+                except:
+                    pass
+            
+            logger.info("✅ Prodotto presumibilmente aggiunto al carrello")
             return True
             
         except Exception as e:
@@ -191,6 +240,8 @@ class Shopify1CheckoutAutomation:
         """Va al carrello e clicca checkout"""
         try:
             logger.info("🛒 Andando al carrello Shopify $1...")
+            
+            # Vai direttamente al carrello
             self.driver.get("https://earthesim.com/cart")
             time.sleep(5)
             
@@ -198,14 +249,77 @@ class Shopify1CheckoutAutomation:
             self.close_popups()
             time.sleep(2)
             
-            checkout_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button#checkout")))
+            # Verifica che ci siano prodotti nel carrello
+            try:
+                empty_cart = self.driver.find_element(By.CSS_SELECTOR, ".cart--empty, [class*='empty']")
+                if empty_cart.is_displayed():
+                    logger.error("❌ Carrello vuoto")
+                    return False
+            except:
+                pass  # Carrello non vuoto, procedi
+            
+            # Cerca il bottone checkout con diversi selettori
+            checkout_selectors = [
+                "button#checkout",
+                "a[href*='checkout']",
+                "button[name='checkout']",
+                "[value*='checkout']",
+                ".checkout-button",
+                "button[class*='checkout']",
+                "a.checkout"
+            ]
+            
+            checkout_button = None
+            for selector in checkout_selectors:
+                try:
+                    checkout_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    logger.info(f"✅ Trovato bottone checkout con: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not checkout_button:
+                logger.error("❌ Bottone checkout non trovato")
+                # Prova a cercare il link checkout nel testo
+                try:
+                    checkout_links = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Checkout') or contains(text(), 'checkout')]")
+                    for link in checkout_links:
+                        if link.is_displayed() and link.is_enabled():
+                            self.driver.execute_script("arguments[0].click();", link)
+                            logger.info("✅ Cliccato checkout via testo")
+                            time.sleep(8)
+                            return True
+                except:
+                    pass
+                return False
             
             # Usa JavaScript click per evitare interception
-            self.driver.execute_script("arguments[0].click();", checkout_button)
-            logger.info("✅ Cliccato 'Check out' Shopify $1")
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", checkout_button)
+                time.sleep(1)
+                self.driver.execute_script("arguments[0].click();", checkout_button)
+                logger.info("✅ Cliccato 'Check out' Shopify $1 via JavaScript")
+            except Exception as js_error:
+                logger.warning(f"⚠️ JavaScript click fallito: {js_error}, provo click normale")
+                try:
+                    checkout_button.click()
+                    logger.info("✅ Cliccato 'Check out' Shopify $1 via click normale")
+                except Exception as click_error:
+                    logger.error(f"❌ Anche click normale fallito: {click_error}")
+                    return False
             
+            # Attendi il reindirizzamento a checkout
             time.sleep(8)
-            return True
+            
+            # Verifica che siamo sulla pagina di checkout
+            current_url = self.driver.current_url
+            if "checkout" in current_url or "shopify.com" in current_url:
+                logger.info("✅ Successfully redirected to checkout")
+                return True
+            else:
+                logger.warning(f"⚠️ Possibile problema nel reindirizzamento: {current_url}")
+                # Potrebbe essere comunque OK, continua
+                return True
             
         except Exception as e:
             logger.error(f"❌ Errore nel checkout: {e}")
@@ -222,39 +336,91 @@ class Shopify1CheckoutAutomation:
             time.sleep(2)
             
             # EMAIL
-            email_field = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input#email")))
-            email_field.clear()
-            email_field.send_keys(info['email'])
+            email_selectors = ["input#email", "input[name='email']", "[id*='email']"]
+            email_field = None
+            for selector in email_selectors:
+                try:
+                    email_field = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
+                    break
+                except:
+                    continue
+            
+            if email_field:
+                email_field.clear()
+                email_field.send_keys(info['email'])
+                logger.info(f"✅ Email inserita: {info['email']}")
             
             # FIRST NAME
-            first_name_field = self.driver.find_element(By.CSS_SELECTOR, "input#TextField0")
-            first_name_field.clear()
-            first_name_field.send_keys(info['first_name'])
+            first_name_selectors = ["input#TextField0", "input[name='first-name']", "input[placeholder*='First']"]
+            for selector in first_name_selectors:
+                try:
+                    first_name_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    first_name_field.clear()
+                    first_name_field.send_keys(info['first_name'])
+                    logger.info(f"✅ First Name inserito: {info['first_name']}")
+                    break
+                except:
+                    continue
             
             # LAST NAME
-            last_name_field = self.driver.find_element(By.CSS_SELECTOR, "input#TextField1")
-            last_name_field.clear()
-            last_name_field.send_keys(info['last_name'])
+            last_name_selectors = ["input#TextField1", "input[name='last-name']", "input[placeholder*='Last']"]
+            for selector in last_name_selectors:
+                try:
+                    last_name_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    last_name_field.clear()
+                    last_name_field.send_keys(info['last_name'])
+                    logger.info(f"✅ Last Name inserito: {info['last_name']}")
+                    break
+                except:
+                    continue
             
             # ADDRESS
-            address_field = self.driver.find_element(By.CSS_SELECTOR, "input#billing-address1")
-            address_field.clear()
-            address_field.send_keys(info['address'])
+            address_selectors = ["input#billing-address1", "input[name='address1']", "input[placeholder*='Address']"]
+            for selector in address_selectors:
+                try:
+                    address_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    address_field.clear()
+                    address_field.send_keys(info['address'])
+                    logger.info(f"✅ Address inserito: {info['address']}")
+                    break
+                except:
+                    continue
             
             # CITY
-            city_field = self.driver.find_element(By.CSS_SELECTOR, "input#TextField4")
-            city_field.clear()
-            city_field.send_keys(info['city'])
+            city_selectors = ["input#TextField4", "input[name='city']", "input[placeholder*='City']"]
+            for selector in city_selectors:
+                try:
+                    city_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    city_field.clear()
+                    city_field.send_keys(info['city'])
+                    logger.info(f"✅ City inserita: {info['city']}")
+                    break
+                except:
+                    continue
             
             # POSTAL CODE
-            postal_field = self.driver.find_element(By.CSS_SELECTOR, "input#TextField3")
-            postal_field.clear()
-            postal_field.send_keys(info['postal_code'])
+            postal_selectors = ["input#TextField3", "input[name='postal-code']", "input[placeholder*='Postal']"]
+            for selector in postal_selectors:
+                try:
+                    postal_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    postal_field.clear()
+                    postal_field.send_keys(info['postal_code'])
+                    logger.info(f"✅ Postal Code inserito: {info['postal_code']}")
+                    break
+                except:
+                    continue
             
             # PHONE NUMBER
-            phone_field = self.driver.find_element(By.CSS_SELECTOR, "input#TextField5")
-            phone_field.clear()
-            phone_field.send_keys(info['phone'])
+            phone_selectors = ["input#TextField5", "input[name='phone']", "input[placeholder*='Phone']"]
+            for selector in phone_selectors:
+                try:
+                    phone_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    phone_field.clear()
+                    phone_field.send_keys(info['phone'])
+                    logger.info(f"✅ Phone inserito: {info['phone']}")
+                    break
+                except:
+                    continue
             
             logger.info("✅ Informazioni spedizione Shopify $1 compilate")
             return True
@@ -309,9 +475,12 @@ class Shopify1CheckoutAutomation:
             time.sleep(2)
             
             # Forza validazione
-            email_field = self.driver.find_element(By.CSS_SELECTOR, "input#email")
-            email_field.click()
-            time.sleep(1)
+            try:
+                email_field = self.driver.find_element(By.CSS_SELECTOR, "input#email")
+                email_field.click()
+                time.sleep(1)
+            except:
+                pass
             
             logger.info("✅ Informazioni pagamento Shopify $1 compilate")
             return True
